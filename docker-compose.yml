@@ -19,6 +19,8 @@ services:
       # Папка для твоих таблиц / результатов
       - ./data:/workspace/data
       - ./models:/workspace/models
+      - ./entrant_data:/workspace/entrant/data
+      - ./entrant_output:/workspace/entrant/output
 
     stdin_open: true
     tty: true
