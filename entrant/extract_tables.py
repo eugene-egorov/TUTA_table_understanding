@@ -508,14 +508,6 @@ def process_ws(ws):
         content.pop(index)
         styles.pop(index)
 
-    # Do not process the worksheet if there are cells with large text content
-    # Scan the content to see if such cells exist
-    for row in content:
-        for cell in row:
-            cell_value = str(cell)
-            if len(cell_value.split()) > 20:
-                skippedLogger.info(f'{ws.title}')
-                return None
     # Get table title this is the cell (0,0), otherwise the spreadsheet name
     title = str(content[0][0])
     if title is None or title == '' or title == ' ':

@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  entrant:
+    build:
+      context: .
+      dockerfile: DockerfileEntrant
+    container_name: entrant
+    restart: unless-stopped
+    working_dir: /workspace/entrant
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Код и рабочие файлы entrant
+      - ./entrant:/workspace/entrant
+      # Данные/результаты остаются на хосте
+      - ./entrant_data:/workspace/entrant/data
+      - ./entrant_output:/workspace/entrant/output
+    stdin_open: true
+    tty: true
+    command: bash
