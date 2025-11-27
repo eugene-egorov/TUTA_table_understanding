@@ -15,19 +15,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /workspace
 
-# Клонируем TUTA
-RUN git clone https://github.com/microsoft/TUTA_table_understanding.git tuta
+# Копируем локальные проекты
+COPY tuta /workspace/tuta
+COPY entrant /workspace/entrant
+
+# Обновляем pip
+RUN pip install --upgrade pip
 
 WORKDIR /workspace/tuta
-
-# Обновляем pip (можно и не трогать, но пусть будет ок)
-RUN pip install --upgrade pip
 
 # ВАЖНО: выкидываем строку python>=3.8.0 из requirements.txt,
 # чтобы pip не пытался установить несуществующий пакет "python"
 RUN sed -i '/^python[>= ]/d' requirements.txt
 
 # Ставим зависимости TUTA
+RUN pip install -r requirements.txt
+
+WORKDIR /workspace/entrant
+
+# Ставим зависимости entrant
 RUN pip install -r requirements.txt
 
 # Рабочая директория по умолчанию
