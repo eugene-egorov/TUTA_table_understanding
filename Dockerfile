@@ -18,17 +18,19 @@ WORKDIR /workspace
 # Клонируем TUTA
 RUN git clone https://github.com/microsoft/TUTA_table_understanding.git tuta
 
-# Ставим зависимости TUTA
 WORKDIR /workspace/tuta
 
-# Обновляем pip и ставим requirements
-# Если в requirements.txt есть строка с torch, можно её закомментировать,
-# чтобы не конфликтовала с уже установленным PyTorch из базового образа.
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# Обновляем pip (можно и не трогать, но пусть будет ок)
+RUN pip install --upgrade pip
 
-# Рабочая директория по умолчанию — корневая
+# ВАЖНО: выкидываем строку python>=3.8.0 из requirements.txt,
+# чтобы pip не пытался установить несуществующий пакет "python"
+RUN sed -i '/^python[>= ]/d' requirements.txt
+
+# Ставим зависимости TUTA
+RUN pip install -r requirements.txt
+
+# Рабочая директория по умолчанию
 WORKDIR /workspace
 
-# По умолчанию просто открываем bash, чтобы ты мог руками запускать скрипты
 CMD ["bash"]
