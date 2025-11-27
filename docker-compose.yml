@@ -18,7 +18,7 @@ services:
     volumes:
       # Папка для твоих таблиц / результатов
       - ./data:/workspace/data
-      - ./models:/workspace/data
+      - ./models:/workspace/models
 
     stdin_open: true
     tty: true
