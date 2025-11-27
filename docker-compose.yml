@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   tuta:
-    image: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+    build: .
     container_name: tuta
     restart: unless-stopped
 
@@ -16,13 +16,10 @@ services:
     working_dir: /workspace
 
     volumes:
-      # сам репозиторий TUTA
-      - ./tuta:/workspace/tuta
-      # твои данные (таблицы, результаты и т.п.)
+      # Папка для твоих таблиц / результатов
       - ./data:/workspace/data
-      - ./models:/workspace/models
+      - ./models:/workspace/data
 
-    # просто открыть bash, чтобы ты дальше сам запускал, что нужно
-    command: bash
     stdin_open: true
     tty: true
+    command: bash
