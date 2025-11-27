@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  tuta:
+    image: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+    container_name: tuta
+    restart: unless-stopped
+
+    # Доступ к GPU (аналогично тому, как у тебя настроен ollama)
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONUNBUFFERED=1
+
+    working_dir: /workspace
+
+    volumes:
+      # сам репозиторий TUTA
+      - ./tuta:/workspace/tuta
+      # твои данные (таблицы, результаты и т.п.)
+      - ./data:/workspace/data
+      - ./models:/workspace/models
+
+    # просто открыть bash, чтобы ты дальше сам запускал, что нужно
+    command: bash
+    stdin_open: true
+    tty: true
