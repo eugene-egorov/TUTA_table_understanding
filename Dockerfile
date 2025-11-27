@@ -8,6 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # Немного утилит
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     git \
     wget \
     ca-certificates \
