@@ -15,7 +15,8 @@ services:
       - ./entrant:/workspace/entrant
       # Данные/результаты остаются на хосте
       - ./entrant_data:/workspace/entrant/data
-      - ./entrant_output:/workspace/entrant/output
+      - ./entrant_output:/workspace/entrant_output
+      - ./entrant_to_tuta:/workspace/entrant_to_tuta
     stdin_open: true
     tty: true
     command: bash
