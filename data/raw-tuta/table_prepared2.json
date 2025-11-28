@@ -1,5 +1,4 @@
-[
-  {
+{
     "StorageAccount": "EDGARExcelCrawled",
     "BlobName": "DataSpreadsheet",
     "SheetName": "Лист1",
@@ -14588,4 +14587,3 @@
       ]
     ]
   }
-]
