@@ -163,12 +163,50 @@
         drawOverlay();
       }
 
-      function getCellLabel(cell) {
-        if (!cell) return '';
-        if (labelMode === 'label_tok') {
-          return cell.label_tok ?? cell.label ?? '';
+      // Возвращает подпись и confidence, нормализованную относительно равномерного распределения.
+      function getLabelRenderData(cell) {
+        if (!cell) return { labelText: '', confidence: 0 };
+
+        const modeKey = labelMode === 'label_tok' ? 'label_tok' : 'label_sep';
+        const labelText = cell[modeKey] ?? cell.label ?? '';
+        const probs = modeKey === 'label_tok' ? cell.tok_probs : cell.sep_probs;
+
+        const entries = probs && typeof probs === 'object'
+          ? Object.entries(probs).filter(([, v]) => Number.isFinite(v))
+          : [];
+
+        const classCount = entries.length || 0;
+        const uniform = classCount > 1 ? 1 / classCount : 0; // базовый уровень уверенности при равномерном распределении
+
+        let rawProb = 0;
+        if (labelText && probs && Number.isFinite(probs[labelText])) {
+          rawProb = probs[labelText];
+        } else if (entries.length) {
+          rawProb = Math.max(...entries.map(([, v]) => v));
         }
-        return cell.label_sep ?? cell.label ?? '';
+
+        // Нормализуем так, чтобы uniform → 0, 1 → 1. Всё ниже uniform даёт 0.
+        let confidence;
+        if (classCount > 1) {
+          confidence = Math.max(0, Math.min(1, (rawProb - uniform) / (1 - uniform)));
+        } else {
+          confidence = Math.max(0, Math.min(1, rawProb));
+        }
+
+        return { labelText, confidence };
+      }
+
+      function confidenceToColor(confidence) {
+        const t = Math.max(0, Math.min(1, confidence));
+        const start = [225, 242, 225]; // бледно-зелёный
+        const end   = [16, 128, 64];   // насыщенный зелёный
+
+        const r = Math.round(start[0] + (end[0] - start[0]) * t);
+        const g = Math.round(start[1] + (end[1] - start[1]) * t);
+        const b = Math.round(start[2] + (end[2] - start[2]) * t);
+
+        const alpha = 0.35 + 0.45 * t; // немного увеличиваем непрозрачность с уверенностью
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
       }
 
       // === ГЛАВНАЯ ФУНКЦИЯ ОТРИСОВКИ ОВЕРЛЕЯ ===
@@ -216,11 +254,15 @@
           const w = visCell.width;
           const h = visCell.height;
 
-          const labelText = getCellLabel(cell);
+          const { labelText, confidence } = getLabelRenderData(cell);
           if (!labelText) return;
 
           const cx = x + w / 2;
           const cy = y + h / 2;
+
+          // Подложка по уверенности
+          overlayCtx.fillStyle = confidenceToColor(confidence);
+          overlayCtx.fillRect(x, y, w, h);
 
           overlayCtx.lineWidth = 3;
           overlayCtx.strokeStyle = outlineColor;

@@ -488,9 +488,6 @@ def process_ws(ws):
         if num_nones == num_columns:
             num_empty_rows += 1
             empty_row_idx = rowid
-    if num_empty_rows > 1:
-        # Don't process the table
-        return None
     if 0 < num_empty_rows < 2 and empty_row_idx is not None:
         content.pop(empty_row_idx)
         styles.pop(empty_row_idx)
