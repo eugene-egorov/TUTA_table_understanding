@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Canvas Datagrid + JSON разметка</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #toolbar {
+      padding: 8px 12px;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 14px;
+    }
+
+    #toolbar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #label-toggle {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      border: 1px solid #e1e1e1;
+      border-radius: 8px;
+      background: #f8f8f8;
+    }
+
+    #label-toggle.visible {
+      display: inline-flex;
+    }
+
+    #label-toggle .option {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-weight: 600;
+    }
+
+    #grid-wrapper {
+      position: relative;
+      flex: 1;
+      min-height: 0;
+    }
+
+    canvas-datagrid, .canvas-datagrid {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #overlay {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+    }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <label>
+      Excel:
+      <input type="file" id="file-excel" accept=".xlsx,.xls,.csv" />
+    </label>
+
+    <label>
+      JSON разметка:
+      <input type="file" id="file-json" accept=".json" />
+    </label>
+
+    <div id="label-toggle" aria-label="Отображение меток по ячейкам">
+      <span>Текст в ячейке:</span>
+      <label class="option">
+        <input type="radio" name="label-mode" value="label_sep" checked />
+        label_sep
+      </label>
+      <label class="option">
+        <input type="radio" name="label-mode" value="label_tok" />
+        label_tok
+      </label>
+    </div>
+  </div>
+
+  <div id="grid-wrapper"></div>
+
+  <!-- Canvas Datagrid -->
+  <script src="https://unpkg.com/canvas-datagrid/dist/canvas-datagrid.js"></script>
+  <!-- SheetJS (XLSX) -->
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+
+  <script>
+    (function () {
+      const wrapper = document.getElementById('grid-wrapper');
+      const labelToggle = document.getElementById('label-toggle');
+      const labelModeInputs = labelToggle.querySelectorAll('input[name="label-mode"]');
+
+      // === GRID ===
+      const grid = canvasDatagrid({
+        parentNode: wrapper,
+        data: [
+          ['Загрузите Excel и JSON с разметкой'],
+        ],
+        showRowHeaders: false,
+        showColumnHeaders: false,
+        editable: false,
+        allowColumnResize: false,
+        allowRowResize: false,
+      });
+
+      grid.style.width = '100%';
+      grid.style.height = '100%';
+
+      // === OVERLAY CANVAS ===
+      const overlay = document.createElement('canvas');
+      overlay.id = 'overlay';
+      overlay.style.width = '100%';
+      overlay.style.height = '100%';
+      wrapper.appendChild(overlay);
+      const overlayCtx = overlay.getContext('2d');
+
+      // Глобальное состояние
+      let workbook = null;          // Excel-книга
+      let jsonSheetName = null;     // sheet_name из JSON (если есть)
+      let currentSheetName = null;
+      let annotations = [];         // [{ row, col, label_sep, label_tok, ... }]
+      let labelMode = 'label_sep';  // 'label_sep' | 'label_tok'
+
+      function resizeOverlayToGrid() {
+        const rect = grid.getBoundingClientRect();
+        overlay.width  = rect.width;
+        overlay.height = rect.height;
+
+        overlay.style.width  = rect.width + 'px';
+        overlay.style.height = rect.height + 'px';
+      }
+
+      function setLabelToggleVisible(isVisible) {
+        labelToggle.classList.toggle('visible', Boolean(isVisible));
+      }
+
+      function setLabelMode(newMode) {
+        labelMode = newMode === 'label_tok' ? 'label_tok' : 'label_sep';
+        labelModeInputs.forEach((input) => {
+          input.checked = input.value === labelMode;
+        });
+        drawOverlay();
+      }
+
+      function getCellLabel(cell) {
+        if (!cell) return '';
+        if (labelMode === 'label_tok') {
+          return cell.label_tok ?? cell.label ?? '';
+        }
+        return cell.label_sep ?? cell.label ?? '';
+      }
+
+      // === ГЛАВНАЯ ФУНКЦИЯ ОТРИСОВКИ ОВЕРЛЕЯ ===
+      function drawOverlay() {
+        resizeOverlayToGrid();
+        overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+
+        const data = grid.data;
+        if (!Array.isArray(data) || data.length === 0) return;
+
+        const colCount = Array.isArray(data[0]) ? data[0].length : 0;
+        if (!colCount || annotations.length === 0) return;
+
+        const rowCount = data.length;
+        const visible = grid.scrollIndexRect || {
+          top: 0,
+          left: 0,
+          bottom: rowCount - 1,
+          right: colCount - 1,
+        };
+
+        overlayCtx.save();
+        overlayCtx.font = '12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        overlayCtx.textAlign = 'center';
+        overlayCtx.textBaseline = 'middle';
+
+        const outlineColor = 'rgba(255, 255, 255, 0.92)';
+        const textColor = '#0f172a';
+
+        annotations.forEach((cell) => {
+          const row = cell.row;
+          const col = cell.col;
+
+          if (!Number.isInteger(row) || !Number.isInteger(col)) return;
+          if (row < 0 || col < 0 || row >= rowCount || col >= colCount) return;
+          if (row < visible.top - 1 || row > visible.bottom + 1 || col < visible.left - 1 || col > visible.right + 1) {
+            return; // не отрисовываем ячейки вне видимой области
+          }
+
+          const visCell = grid.getVisibleCellByIndex(col, row);
+          if (!visCell) return;
+
+          const x = visCell.offsetLeft;
+          const y = visCell.offsetTop;
+          const w = visCell.width;
+          const h = visCell.height;
+
+          const labelText = getCellLabel(cell);
+          if (!labelText) return;
+
+          const cx = x + w / 2;
+          const cy = y + h / 2;
+
+          overlayCtx.lineWidth = 3;
+          overlayCtx.strokeStyle = outlineColor;
+          overlayCtx.strokeText(labelText, cx, cy);
+
+          overlayCtx.fillStyle = textColor;
+          overlayCtx.fillText(labelText, cx, cy);
+        });
+
+        overlayCtx.restore();
+      }
+
+      // Перерисовываем overlay при скролле/ресайзе/смене данных
+      [
+        'scroll',
+        'resize',
+        'resizecolumn',
+        'datachanged',
+        'schemachanged',
+        'stylechanged',
+      ].forEach(evt => grid.addEventListener(evt, drawOverlay));
+
+      // первая отрисовка, когда grid отрендерится
+      grid.addEventListener('rendercell', function initOnce() {
+        grid.removeEventListener('rendercell', initOnce);
+        drawOverlay();
+      });
+
+      // === РЕНДЕР ЛИСТА ИЗ EXCEL С УЧЁТОМ sheet_name ИЗ JSON ===
+      function renderSheetFromWorkbook() {
+        if (!workbook) {
+          drawOverlay();
+          return;
+        }
+
+        let sheetName = workbook.SheetNames[0];
+
+        if (jsonSheetName && workbook.SheetNames.includes(jsonSheetName)) {
+          sheetName = jsonSheetName;
+        }
+
+        currentSheetName = sheetName;
+        const sheet = workbook.Sheets[sheetName];
+
+        const ref   = sheet['!ref'] || 'A1';
+        const range = XLSX.utils.decode_range(ref);
+
+        const colCount   = range.e.c - range.s.c + 1;
+        const topOffset  = range.s.r; // сколько строк «пропущено» сверху (0-индекс)
+
+        const raw = XLSX.utils.sheet_to_json(sheet, {
+          header: 1,
+          defval: '',
+        });
+
+        // нормализуем строки по количеству колонок
+        const aoa = raw.map(row => {
+          const r = row.slice();
+          for (let i = 0; i < colCount; i++) {
+            if (r[i] === undefined) r[i] = '';
+          }
+          return r;
+        });
+
+        // добавляем пустые строки сверху,
+        // чтобы индекс 0 соответствовал A1, 1 — A2, и т.д.
+        if (topOffset > 0) {
+          const emptyRow = new Array(colCount).fill('');
+          for (let i = 0; i < topOffset; i++) {
+            aoa.unshift(emptyRow.slice());
+          }
+        }
+
+        grid.data = aoa;
+        drawOverlay();
+      }
+
+      // === ПОМОЩНИКИ ДЛЯ JSON С ЯЧЕЙКАМИ ===
+      function pickCellsFromJson(parsed) {
+        if (!parsed) {
+          return { cells: [], sheet: null };
+        }
+
+        if (Array.isArray(parsed)) {
+          const found = parsed.find(item => item && Array.isArray(item.cells));
+          if (found) {
+            return {
+              cells: found.cells,
+              sheet: found.sheet_name || found.sheet || null,
+            };
+          }
+        }
+
+        if (parsed && Array.isArray(parsed.cells)) {
+          return {
+            cells: parsed.cells,
+            sheet: parsed.sheet_name || parsed.sheet || null,
+          };
+        }
+
+        return {
+          cells: [],
+          sheet: parsed.sheet_name || parsed.sheet || null,
+        };
+      }
+
+      setLabelToggleVisible(false);
+
+      labelModeInputs.forEach((input) => {
+        input.addEventListener('change', () => {
+          if (input.checked) {
+            setLabelMode(input.value);
+          }
+        });
+      });
+
+      // === ЗАГРУЗКА EXCEL ===
+      const excelInput = document.getElementById('file-excel');
+      excelInput.addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function (evt) {
+          const data = new Uint8Array(evt.target.result);
+          workbook = XLSX.read(data, { type: 'array' });
+          renderSheetFromWorkbook();
+        };
+        reader.readAsArrayBuffer(file);
+      });
+
+      // === ЗАГРУЗКА JSON С ЯЧЕЙКАМИ ===
+      const jsonInput = document.getElementById('file-json');
+      jsonInput.addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function (evt) {
+          try {
+            const text = evt.target.result;
+            const parsed = JSON.parse(text);
+
+            const { cells, sheet } = pickCellsFromJson(parsed);
+
+            annotations = Array.isArray(cells) ? cells : [];
+            jsonSheetName = sheet || null;
+
+            setLabelToggleVisible(annotations.length > 0);
+            setLabelMode(labelMode); // обновляем radio и перерисовываем overlay
+
+            renderSheetFromWorkbook();
+            drawOverlay();
+          } catch (err) {
+            console.error(err);
+            alert('Ошибка чтения JSON: ' + err.message);
+          }
+        };
+        reader.readAsText(file, 'utf-8');
+      });
+
+      // для дебага в консоли
+      window.grid = grid;
+      window.getAnnotations = () => annotations;
+      window.redrawOverlay = drawOverlay;
+      window.setLabelMode = setLabelMode;
+    })();
+  </script>
+</body>
+</html>
