@@ -149,8 +149,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--label_map",
         type=str,
-        default=None,
-        help="Optional comma-separated label names or path to JSON list/dict to map ids to names.",
+        default="metadata,notes,data,attributes,header,derived",
+        help="Comma-separated label names or path to JSON list/dict to map ids to names.",
     )
     parser.add_argument("--verbose", action="store_true", help="Print extra progress info.")
 
@@ -338,7 +338,7 @@ def id_to_label(idx: int, label_map: Optional[Dict[int, str]]) -> Union[str, int
 
 def predict_single(
     model: CtcInferenceModel, features: Tuple[List, ...], device: torch.device
-) -> Tuple[List[int], List[int]]:
+) -> Tuple[List[int], List[int], List[List[float]], List[List[float]]]:
     (
         token_id,
         num_mag,
@@ -375,11 +375,60 @@ def predict_single(
     }
 
     with torch.no_grad():
-        sep_triple, tok_triple = model(**inputs)
+        # Manual forward to expose logits for probability maps.
+        if model.target == "base":
+            encoded_states = model.backbone(
+                inputs["token_id"],
+                inputs["num_mag"],
+                inputs["num_pre"],
+                inputs["num_top"],
+                inputs["num_low"],
+                inputs["token_order"],
+                inputs["pos_top"],
+                inputs["pos_left"],
+                inputs["format_vec"],
+                inputs["indicator"],
+            )
+        else:
+            encoded_states = model.backbone(
+                inputs["token_id"],
+                inputs["num_mag"],
+                inputs["num_pre"],
+                inputs["num_top"],
+                inputs["num_low"],
+                inputs["token_order"],
+                inputs["pos_row"],
+                inputs["pos_col"],
+                inputs["pos_top"],
+                inputs["pos_left"],
+                inputs["format_vec"],
+                inputs["indicator"],
+            )
+        head = model.ctc_head
+        cell_states = head.aggr_funcs[head.aggregator](encoded_states, inputs["indicator"])
 
-    sep_pred = sep_triple[1].detach().cpu().tolist()
-    tok_pred = tok_triple[1].detach().cpu().tolist()
-    return sep_pred, tok_pred
+        ctc_label = inputs["ctc_label"].view(-1)
+        cell_states = cell_states.view(ctc_label.size()[0], -1)
+        ctc_logits = cell_states[ctc_label > -1, :]
+
+        # Separator logits/probs
+        sep_logits = head.uniform_linear(ctc_logits[0::2, :])
+        sep_logits = head.tanh(sep_logits)
+        sep_logits = head.predict_linear(sep_logits)
+        sep_probs = torch.softmax(sep_logits, dim=-1)
+
+        # Token logits/probs
+        tok_logits = head.uniform_linear(ctc_logits[1::2, :])
+        tok_logits = head.tanh(tok_logits)
+        tok_logits = head.predict_linear(tok_logits)
+        tok_probs = torch.softmax(tok_logits, dim=-1)
+
+        sep_pred = sep_probs.argmax(dim=-1).detach().cpu().tolist()
+        tok_pred = tok_probs.argmax(dim=-1).detach().cpu().tolist()
+        sep_prob_list = sep_probs.detach().cpu().tolist()
+        tok_prob_list = tok_probs.detach().cpu().tolist()
+
+    return sep_pred, tok_pred, sep_prob_list, tok_prob_list
 
 
 def run_inference(args: argparse.Namespace) -> None:
@@ -406,21 +455,34 @@ def run_inference(args: argparse.Namespace) -> None:
                 table_idx += 1
                 continue
             features, cell_positions = built
-            sep_pred, tok_pred = predict_single(model, features, device)
+            sep_pred, tok_pred, sep_probs, tok_probs = predict_single(model, features, device)
 
             # Align predictions with cell coordinates
             cell_entries = []
-            paired_len = min(len(cell_positions), len(tok_pred), len(sep_pred))
+            paired_len = min(len(cell_positions), len(tok_pred), len(sep_pred), len(tok_probs), len(sep_probs))
             for i in range(paired_len):
                 row, col = cell_positions[i]
                 sep_label = id_to_label(sep_pred[i], label_map)
                 tok_label = id_to_label(tok_pred[i], label_map)
+
+                sep_prob_map = (
+                    {id_to_label(idx, label_map): float(prob) for idx, prob in enumerate(sep_probs[i])}
+                    if sep_probs
+                    else None
+                )
+                tok_prob_map = (
+                    {id_to_label(idx, label_map): float(prob) for idx, prob in enumerate(tok_probs[i])}
+                    if tok_probs
+                    else None
+                )
                 cell_entry = {
                     "row": row,
                     "col": col,
                     "label_sep": sep_label,
                     "label_tok": tok_label,
                     "label": tok_label if args.primary_head == "tok" else sep_label,
+                    "sep_probs": sep_prob_map,
+                    "tok_probs": tok_prob_map,
                 }
                 cell_entries.append(cell_entry)
 
