@@ -1,5 +1,11 @@
 /TUTA_table_understanding/models/tuta.bin
 
 
+# for SpreadSheet
+python prepare.py                          \
+--input_dir /workspace/data/raw-tuta   \
+--source_type sheet                        \
+--output_path ./raw-tuta-table-dataset.pt
+
 python run_tuta_ctc_infer.py --model_path /workspace/models/tuta-base.bin --data_dir /wo
 rkspace/data/ --output_dir /workspace/data --max_seq_len 0
